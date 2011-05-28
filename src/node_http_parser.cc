@@ -46,6 +46,12 @@
 using namespace node;
 using namespace v8;
 
+void weakCallback(Persistent<Value> object, void *parameter)
+{
+    object.Dispose();
+    object.Clear();
+}
+
 static Persistent<String> on_message_begin_sym;
 static Persistent<String> on_path_sym;
 static Persistent<String> on_query_string_sym;
@@ -238,7 +244,11 @@ class Parser : public ObjectWrap {
   static int on_message_begin(http_parser *p) {
 	Local<Object> _headers = Object::New();
     Parser *parser = static_cast<Parser*>(p->data);
+	// For some reason, doing dispose directly here is way faster than using 
+	// a weak reference and allowing garbage collection to dispose the object
+	parser->_headers.Dispose();
 	parser->_headers = Persistent<Object>::New(Object::New());
+	//parser->_headers.MakeWeak(NULL, weakCallback);
     parser->_field_off = 0;
 	parser->_value_off = 0;
     Local<Value> cb_value = parser->handle_->Get(on_message_begin_sym);
@@ -290,7 +300,7 @@ class Parser : public ObjectWrap {
     message_info->Set(upgrade_sym, p->upgrade ? True() : False());
 
     Local<Value> argv[2] = { message_info, parser->_headers->Clone() };
-  	parser->_headers.Dispose();
+
     Local<Value> head_response = cb->Call(parser->handle_, 2, argv);
 
     if (head_response.IsEmpty()) {
@@ -415,7 +425,7 @@ class Parser : public ObjectWrap {
   static Handle<Value> Reinitialize(const Arguments& args) {
     HandleScope scope;
     Parser *parser = ObjectWrap::Unwrap<Parser>(args.This());
-  	parser->_headers.Dispose();
+  	//parser->_headers.Dispose();
     String::Utf8Value type(args[0]->ToString());
 
     if (0 == strcasecmp(*type, "request")) {

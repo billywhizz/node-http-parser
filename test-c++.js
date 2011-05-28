@@ -1,3 +1,5 @@
+var rss = (process.memoryUsage().rss/(1024*1024)).toFixed(2);
+console.log(rss);
 var HTTPParser = require("./lib/parser").HTTPParser;
 
 var response = [];
@@ -50,6 +52,9 @@ for(var i=0; i<tlen; i+=chunksize) {
 var now = new Date().getTime();
 var elapsed = (now-then)/1000;
 console.log("total: " + parsed + " time: " + elapsed.toFixed(2) + " p/sec: " + (parsed/elapsed).toFixed(2));
+response = null;
+parser = null;
 setInterval(function() {
-	console.log(process.memoryUsage());
+	var rss = (process.memoryUsage().rss/(1024*1024)).toFixed(2);
+	console.log(rss);
 }, 1000);
