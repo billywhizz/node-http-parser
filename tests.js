@@ -16,10 +16,13 @@ response.push("set-cookie: session-id=277-1111279-4168403; path=/; domain=.amazo
 var display = false;
 var chunksize = parseInt(process.ARGV[2]);
 var messages = parseInt(process.ARGV[3]);
+var version = "0.0.0";
 if(process.ARGV.length > 4) {
 	display = (process.ARGV[4] === "true");
 }
-
+if(process.ARGV.length > 5) {
+	version = process.ARGV[5];
+}
 function testcpp(buff, type) {
 	var rr = "";
 	
@@ -53,7 +56,7 @@ function testcpp(buff, type) {
 	var now = new Date().getTime();
 	process.stderr.write("end: " + now + "\n");
 	var elapsed = (now-then)/1000;
-	process.stdout.write("c++\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
+	process.stdout.write(version + "\tc++\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
 	payload = null;
 	parser = null;
 }
@@ -146,7 +149,7 @@ function testnode(buff, type) {
 	var now = new Date().getTime();
 	process.stderr.write("end: " + now + "\n");
 	var elapsed = (now-then)/1000;
-	process.stdout.write("node\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
+	process.stdout.write(version + "\tnode\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
 	payload = null;
 	parser = null;
 }

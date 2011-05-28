@@ -160,14 +160,15 @@ method_to_str(unsigned short m) {
 class Parser : public ObjectWrap {
  public:
 
-  // TODO: change this to use v8 Strings and user String.asciiWrite() & String.Length()
+  // TODO: change this to use v8 Strings and use String.asciiWrite() & String.Length()
   char _field[255];
   int _field_off;
   char _value[4096];
   int _value_off;
   Persistent<Object> _headers;
   Persistent<Object> _info;
-
+  Persistent<Function> _cb;
+  
   Parser(enum http_parser_type type) : ObjectWrap() {
     Init(type);
   }
