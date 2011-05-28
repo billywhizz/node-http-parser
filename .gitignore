@@ -1,0 +1,3 @@
+build*
+lib/parser.node
+.lock-wscript
