@@ -46,6 +46,8 @@ function testcpp(buff, type) {
 		if(!info.shouldKeepAlive) parser.reinitialize(type);
 	};
 	
+	parser.bind();
+	
 	var then = new Date().getTime();
 	process.stderr.write("start: " + then + "\n");
 	while(parsed < messages) {
@@ -135,6 +137,7 @@ function testnode(buff, type) {
 		}
 		parsed++;
 		if(display) console.log(JSON.stringify(parser.incoming));
+		// TODO - remove the need to do this and reinitialize to same type automatically in the parser 
 		if(!parser.incoming.info.shouldKeepAlive) parser.reinitialize(type);
 		parser.incoming = null;
 	};

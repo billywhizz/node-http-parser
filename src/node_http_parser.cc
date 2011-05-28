@@ -46,6 +46,22 @@
 using namespace node;
 using namespace v8;
 
+struct __callback {
+	Persistent<Function> fun;
+	bool on;
+};
+
+struct __callbacks {
+	__callback on_message_begin_cb;
+	__callback on_path_cb;
+	__callback on_query_string_cb;
+	__callback on_url_cb;
+	__callback on_fragment_cb;
+	__callback on_headers_complete_cb;
+	__callback on_body_cb;
+	__callback on_message_complete_cb;
+};
+
 void weakCallback(Persistent<Value> object, void *parameter)
 {
     object.Dispose();
@@ -104,25 +120,26 @@ static char* current_buffer_data;
 static size_t current_buffer_len;
 
 // Callback prototype for http_data_cb
-#define DEFINE_HTTP_DATA_CB(name)                                        \
-  static int name(http_parser *p, const char *at, size_t length) {       \
-    Parser *parser = static_cast<Parser*>(p->data);                      \
-    assert(current_buffer);                                              \
-    Local<Value> cb_value = parser->handle_->Get(name##_sym);            \
-    if (!cb_value->IsFunction()) return 0;                               \
-    Local<Function> cb = Local<Function>::Cast(cb_value);                \
-    Local<Value> argv[3] = { *current_buffer                             \
-                           , Integer::New(at - current_buffer_data)      \
-                           , Integer::New(length)                        \
-                           };                                            \
-    Local<Value> ret = cb->Call(parser->handle_, 3, argv);               \
-    assert(current_buffer);                                              \
-    if (ret.IsEmpty()) {                                                 \
-      parser->got_exception_ = true;                                     \
-      return -1;                                                         \
-    } else {                                                             \
-      return 0;                                                          \
-    }                                                                    \
+#define DEFINE_HTTP_DATA_CB(name)                                                          \
+  static int name(http_parser *p, const char *at, size_t length) {                         \
+    Parser *parser = static_cast<Parser*>(p->data);                                        \
+    assert(current_buffer);                                                                \
+    if(parser->_callbacks.name##_cb.on == true) {                                          \
+      Local<Value> argv[3] = { *current_buffer                                             \
+                           , Integer::New(at - current_buffer_data)                        \
+                           , Integer::New(length)                                          \
+                           };                                                              \
+      Local<Value> ret = parser->_callbacks.name##_cb.fun->Call(parser->handle_, 3, argv); \
+      if (ret.IsEmpty()) {                                                                 \
+        parser->got_exception_ = true;                                                     \
+        return -1;                                                                         \
+      } else {                                                                             \
+        return 0;                                                                          \
+      }                                                                                    \
+    }                                                                                      \
+    else {                                                                                 \
+      return 0;                                                                            \
+    }                                                                                      \
   }
 
 
@@ -168,6 +185,7 @@ class Parser : public ObjectWrap {
   Persistent<Object> _headers;
   Persistent<Object> _info;
   Persistent<Function> _cb;
+  __callbacks _callbacks;
   
   Parser(enum http_parser_type type) : ObjectWrap() {
     Init(type);
@@ -232,33 +250,33 @@ class Parser : public ObjectWrap {
 	//parser->_headers.MakeWeak(NULL, weakCallback);
     parser->_field_off = 0;
 	parser->_value_off = 0;
-    Local<Value> cb_value = parser->handle_->Get(on_message_begin_sym);
-    if (!cb_value->IsFunction()) return 0;
-    Local<Function> cb = Local<Function>::Cast(cb_value);
-    Local<Value> ret = cb->Call(parser->handle_, 0, NULL);
+	if(parser->_callbacks.on_message_begin_cb.on == true) {
+    	Local<Value> ret = parser->_callbacks.on_message_begin_cb.fun->Call(parser->handle_, 0, NULL);
+	}
 	return 0;
   }
   
   static int on_message_complete(http_parser *p) {
     Parser *parser = static_cast<Parser*>(p->data);
-    Local<Value> cb_value = parser->handle_->Get(on_message_complete_sym);
-    if (!cb_value->IsFunction()) return 0;
-    Local<Function> cb = Local<Function>::Cast(cb_value);
-
-    Local<Value> argv[2] = { parser->_info->Clone(), parser->_headers->Clone() };
-    Local<Value> ret = cb->Call(parser->handle_, 2, argv);
-    if (ret.IsEmpty()) {
-      parser->got_exception_ = true;
-      return -1;
-    } else {
-      return 0;
-    }
+// TODO: parse any extra headers after body (trailers)
+	if(parser->_callbacks.on_message_complete_cb.on == true) {
+		Local<Value> argv[2] = { parser->_info->Clone(), parser->_headers->Clone() };
+		Local<Value> ret = parser->_callbacks.on_message_complete_cb.fun->Call(parser->handle_, 2, argv);
+		if (ret.IsEmpty()) {
+			parser->got_exception_ = true;
+			return -1;
+		} else {
+			return 0;
+		}
+	}
+	else {
+		return 0;
+	}
   }
 
   static int on_headers_complete(http_parser *p) {
     Parser *parser = static_cast<Parser*>(p->data);
 
-    Local<Value> cb_value = parser->handle_->Get(on_headers_complete_sym);
 	if(parser->_field_off > 0 && parser->_value_off > 0) {
 		Local<String> _field = String::New(parser->_field, parser->_field_off);
 		Local<Array> _header = Local<Array>::Cast(parser->_headers->Get(_field));
@@ -286,17 +304,19 @@ class Parser : public ObjectWrap {
 	parser->_info = Persistent<Object>::New(message_info);
 	//parser->_info.MakeWeak(NULL, weakCallback);
 
-    if (!cb_value->IsFunction()) return 0;
-    Local<Function> cb = Local<Function>::Cast(cb_value);
-    Local<Value> argv[2] = { message_info, parser->_headers->Clone() };
-    Local<Value> head_response = cb->Call(parser->handle_, 2, argv);
-
-    if (head_response.IsEmpty()) {
-      parser->got_exception_ = true;
-      return -1;
-    } else {
-      return head_response->IsTrue() ? 1 : 0;
-    }
+	if(parser->_callbacks.on_headers_complete_cb.on == true) {
+		Local<Value> argv[2] = { message_info, parser->_headers->Clone() };
+		Local<Value> head_response = parser->_callbacks.on_headers_complete_cb.fun->Call(parser->handle_, 2, argv);
+		if (head_response.IsEmpty()) {
+			parser->got_exception_ = true;
+			return -1;
+		} else {
+			return head_response->IsTrue() ? 1 : 0;
+		}
+	}
+	else {
+		return 0;
+	}
   }
 
   static Handle<Value> New(const Arguments& args) {
@@ -318,6 +338,16 @@ class Parser : public ObjectWrap {
     parser->Wrap(args.This());
     parser->_field_off = 0;
 	parser->_value_off = 0;
+
+	parser->_callbacks.on_message_begin_cb.on = false;
+	parser->_callbacks.on_path_cb.on = false;
+	parser->_callbacks.on_query_string_cb.on = false;
+	parser->_callbacks.on_url_cb.on = false;
+	parser->_callbacks.on_fragment_cb.on = false;
+	parser->_callbacks.on_headers_complete_cb.on = false;
+	parser->_callbacks.on_body_cb.on = false;
+	parser->_callbacks.on_message_complete_cb.on = false;
+
     return args.This();
   }
 
@@ -388,6 +418,78 @@ class Parser : public ObjectWrap {
     }
   }
 
+	static Handle<Value> Bind(const Arguments &args) {
+		HandleScope scope;
+		Parser *parser = ObjectWrap::Unwrap<Parser>(args.This());
+
+		Local<Value> on_message_begin_cb = parser->handle_->Get(on_message_begin_sym);
+		if (on_message_begin_cb->IsFunction()) {
+			parser->_callbacks.on_message_begin_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_message_begin_cb));
+			parser->_callbacks.on_message_begin_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_message_begin_cb.on = false;
+		}
+		Local<Value> on_path_cb = parser->handle_->Get(on_path_sym);
+		if (on_path_cb->IsFunction()) {
+			parser->_callbacks.on_path_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_path_cb));
+			parser->_callbacks.on_path_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_path_cb.on = false;
+		}
+		Local<Value> on_query_string_cb = parser->handle_->Get(on_query_string_sym);
+		if (on_query_string_cb->IsFunction()) {
+			parser->_callbacks.on_query_string_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_query_string_cb));
+			parser->_callbacks.on_query_string_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_query_string_cb.on = false;
+		}
+		Local<Value> on_url_cb = parser->handle_->Get(on_url_sym);
+		if (on_url_cb->IsFunction()) {
+			parser->_callbacks.on_url_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_url_cb));
+			parser->_callbacks.on_url_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_url_cb.on = false;
+		}
+		Local<Value> on_fragment_cb = parser->handle_->Get(on_fragment_sym);
+		if (on_fragment_cb->IsFunction()) {
+			parser->_callbacks.on_fragment_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_fragment_cb));
+			parser->_callbacks.on_fragment_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_fragment_cb.on = false;
+		}
+		Local<Value> on_headers_complete_cb = parser->handle_->Get(on_headers_complete_sym);
+		if (on_headers_complete_cb->IsFunction()) {
+			parser->_callbacks.on_headers_complete_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_headers_complete_cb));
+			parser->_callbacks.on_headers_complete_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_headers_complete_cb.on = false;
+		}
+		Local<Value> on_body_cb = parser->handle_->Get(on_body_sym);
+		if (on_body_cb->IsFunction()) {
+			parser->_callbacks.on_body_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_body_cb));
+			parser->_callbacks.on_body_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_body_cb.on = false;
+		}
+		Local<Value> on_message_complete_cb = parser->handle_->Get(on_message_complete_sym);
+		if (on_message_complete_cb->IsFunction()) {
+			parser->_callbacks.on_message_complete_cb.fun = Persistent<Function>::New(Local<Function>::Cast(on_message_complete_cb));
+			parser->_callbacks.on_message_complete_cb.on = true;
+		}
+		else {
+			parser->_callbacks.on_message_complete_cb.on = false;
+		}
+
+		return scope.Close(Integer::New(0));
+	}
+
   static Handle<Value> Finish(const Arguments& args) {
     HandleScope scope;
 
@@ -450,6 +552,7 @@ void InitHttpParser2(Handle<Object> target) {
   NODE_SET_PROTOTYPE_METHOD(t, "execute", Parser::Execute);
   NODE_SET_PROTOTYPE_METHOD(t, "finish", Parser::Finish);
   NODE_SET_PROTOTYPE_METHOD(t, "reinitialize", Parser::Reinitialize);
+  NODE_SET_PROTOTYPE_METHOD(t, "bind", Parser::Bind);
 
   target->Set(String::NewSymbol("HTTPParser"), t->GetFunction());
 
