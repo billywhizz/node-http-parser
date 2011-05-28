@@ -57,8 +57,6 @@ static Persistent<String> on_path_sym;
 static Persistent<String> on_query_string_sym;
 static Persistent<String> on_url_sym;
 static Persistent<String> on_fragment_sym;
-static Persistent<String> on_header_field_sym;
-static Persistent<String> on_header_value_sym;
 static Persistent<String> on_headers_complete_sym;
 static Persistent<String> on_body_sym;
 static Persistent<String> on_message_complete_sym;
@@ -89,17 +87,14 @@ static Persistent<String> unsubscribe_sym;
 static Persistent<String> unknown_method_sym;
 
 static Persistent<String> method_sym;
-static Persistent<String> field_sym;
 static Persistent<String> status_code_sym;
 static Persistent<String> http_version_sym;
 static Persistent<String> version_major_sym;
 static Persistent<String> version_minor_sym;
 static Persistent<String> should_keep_alive_sym;
 static Persistent<String> upgrade_sym;
-static Persistent<String> headers_sym;
 
 static struct http_parser_settings settings;
-
 
 // This is a hack to get the current_buffer to the callbacks with the least
 // amount of overhead. Nothing else will run while http_parser_execute()
@@ -107,22 +102,6 @@ static struct http_parser_settings settings;
 static Local<Value>* current_buffer;
 static char* current_buffer_data;
 static size_t current_buffer_len;
-
-// Callback prototype for http_cb
-#define DEFINE_HTTP_CB(name)                                             \
-  static int name(http_parser *p) {                                      \
-    Parser *parser = static_cast<Parser*>(p->data);                      \
-    Local<Value> cb_value = parser->handle_->Get(name##_sym);            \
-    if (!cb_value->IsFunction()) return 0;                               \
-    Local<Function> cb = Local<Function>::Cast(cb_value);                \
-    Local<Value> ret = cb->Call(parser->handle_, 0, NULL);               \
-    if (ret.IsEmpty()) {                                                 \
-      parser->got_exception_ = true;                                     \
-      return -1;                                                         \
-    } else {                                                             \
-      return 0;                                                          \
-    }                                                                    \
-  }
 
 // Callback prototype for http_data_cb
 #define DEFINE_HTTP_DATA_CB(name)                                        \
@@ -181,11 +160,13 @@ method_to_str(unsigned short m) {
 class Parser : public ObjectWrap {
  public:
 
+  // TODO: change this to use v8 Strings and user String.asciiWrite() & String.Length()
   char _field[255];
   int _field_off;
   char _value[4096];
   int _value_off;
   Persistent<Object> _headers;
+  Persistent<Object> _info;
 
   Parser(enum http_parser_type type) : ObjectWrap() {
     Init(type);
@@ -193,8 +174,6 @@ class Parser : public ObjectWrap {
 
   ~Parser() {
   }
-
-  DEFINE_HTTP_CB(on_message_complete)
 
   DEFINE_HTTP_DATA_CB(on_path)
   DEFINE_HTTP_DATA_CB(on_url)
@@ -247,6 +226,7 @@ class Parser : public ObjectWrap {
 	// For some reason, doing dispose directly here is way faster than using 
 	// a weak reference and allowing garbage collection to dispose the object
 	parser->_headers.Dispose();
+	parser->_info.Dispose();
 	parser->_headers = Persistent<Object>::New(Object::New());
 	//parser->_headers.MakeWeak(NULL, weakCallback);
     parser->_field_off = 0;
@@ -258,13 +238,26 @@ class Parser : public ObjectWrap {
 	return 0;
   }
   
+  static int on_message_complete(http_parser *p) {
+    Parser *parser = static_cast<Parser*>(p->data);
+    Local<Value> cb_value = parser->handle_->Get(on_message_complete_sym);
+    if (!cb_value->IsFunction()) return 0;
+    Local<Function> cb = Local<Function>::Cast(cb_value);
+
+    Local<Value> argv[2] = { parser->_info->Clone(), parser->_headers->Clone() };
+    Local<Value> ret = cb->Call(parser->handle_, 2, argv);
+    if (ret.IsEmpty()) {
+      parser->got_exception_ = true;
+      return -1;
+    } else {
+      return 0;
+    }
+  }
+
   static int on_headers_complete(http_parser *p) {
     Parser *parser = static_cast<Parser*>(p->data);
 
     Local<Value> cb_value = parser->handle_->Get(on_headers_complete_sym);
-    if (!cb_value->IsFunction()) return 0;
-    Local<Function> cb = Local<Function>::Cast(cb_value);
-
 	if(parser->_field_off > 0 && parser->_value_off > 0) {
 		Local<String> _field = String::New(parser->_field, parser->_field_off);
 		Local<Array> _header = Local<Array>::Cast(parser->_headers->Get(_field));
@@ -277,30 +270,24 @@ class Parser : public ObjectWrap {
 		parser->_field_off = 0;
 		parser->_value_off = 0;
 	}
-
     Local<Object> message_info = Object::New();
-
-    // METHOD
     if (p->type == HTTP_REQUEST) {
       message_info->Set(method_sym, method_to_str(p->method));
     }
-
-    // STATUS
     if (p->type == HTTP_RESPONSE) {
       message_info->Set(status_code_sym, Integer::New(p->status_code));
     }
-
-    // VERSION
     message_info->Set(version_major_sym, Integer::New(p->http_major));
     message_info->Set(version_minor_sym, Integer::New(p->http_minor));
-
-    message_info->Set(should_keep_alive_sym,
-        http_should_keep_alive(p) ? True() : False());
-
+    message_info->Set(should_keep_alive_sym, http_should_keep_alive(p) ? True() : False());
     message_info->Set(upgrade_sym, p->upgrade ? True() : False());
 
-    Local<Value> argv[2] = { message_info, parser->_headers->Clone() };
+	parser->_info = Persistent<Object>::New(message_info);
+	//parser->_info.MakeWeak(NULL, weakCallback);
 
+    if (!cb_value->IsFunction()) return 0;
+    Local<Function> cb = Local<Function>::Cast(cb_value);
+    Local<Value> argv[2] = { message_info, parser->_headers->Clone() };
     Local<Value> head_response = cb->Call(parser->handle_, 2, argv);
 
     if (head_response.IsEmpty()) {
@@ -506,8 +493,6 @@ void InitHttpParser2(Handle<Object> target) {
   version_minor_sym = NODE_PSYMBOL("versionMinor");
   should_keep_alive_sym = NODE_PSYMBOL("shouldKeepAlive");
   upgrade_sym = NODE_PSYMBOL("upgrade");
-  headers_sym = NODE_PSYMBOL("headers");
-  field_sym = NODE_PSYMBOL("field");
 
   settings.on_message_begin    = Parser::on_message_begin;
   settings.on_path             = Parser::on_path;
