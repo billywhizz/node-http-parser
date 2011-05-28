@@ -1,6 +1,4 @@
-var rss = (process.memoryUsage().rss/(1024*1024)).toFixed(2);
-console.log(rss);
-
+#!/usr/local/bin/node
 var response = [];
 response.push("HTTP/1.1 200 OK");
 response.push("date: Mon, 08 Nov 2010 16:53:22 GMT");
@@ -46,14 +44,16 @@ function testcpp(buff, type) {
 	};
 	
 	var then = new Date().getTime();
+	process.stderr.write("start: " + then + "\n");
 	while(parsed < messages) {
 		for(var i=0; i<tlen; i+=chunksize) {
 			parser.execute(payload, i, chunksize);
 		}
 	}
 	var now = new Date().getTime();
+	process.stderr.write("end: " + now + "\n");
 	var elapsed = (now-then)/1000;
-	console.log("[c++] total: " + parsed + " time: " + elapsed.toFixed(2) + " p/sec: " + (parsed/elapsed).toFixed(2));
+	process.stdout.write("c++\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
 	payload = null;
 	parser = null;
 }
@@ -137,21 +137,19 @@ function testnode(buff, type) {
 	};
 	
 	var then = new Date().getTime();
+	process.stderr.write("start: " + then + "\n");
 	while(parsed < messages) {
 		for(var i=0; i<tlen; i+=chunksize) {
 			parser.execute(payload, i, chunksize);
 		}
 	}
 	var now = new Date().getTime();
+	process.stderr.write("end: " + now + "\n");
 	var elapsed = (now-then)/1000;
-	console.log("[node] total: " + parsed + " time: " + elapsed.toFixed(2) + " p/sec: " + (parsed/elapsed).toFixed(2));
+	process.stdout.write("node\t" + chunksize + "\t" + parsed + "\t" + elapsed.toFixed(2) + "\t" + (parsed/elapsed).toFixed(2) + "\n");
 	payload = null;
 	parser = null;
 }
 
 testnode(response, "response");
 testcpp(response, "response");
-setInterval(function() {
-	var rss = (process.memoryUsage().rss/(1024*1024)).toFixed(2);
-	console.log(rss);
-}, 1000);
